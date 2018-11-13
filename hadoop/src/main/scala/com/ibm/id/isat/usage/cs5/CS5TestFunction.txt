@@ -1,0 +1,30 @@
+package com.ibm.id.isat.usage.cs5
+
+import org.apache.spark.SparkContext;
+import org.apache.spark.SparkConf;
+import org.apache.spark.sql._
+import org.apache.spark.sql.DataFrame
+import org.apache.spark.sql.types.{StructType, StructField, StringType, IntegerType}
+import org.apache.spark.sql.functions._
+import com.ibm.id.isat.utils._
+import org.apache.spark.storage.StorageLevel
+
+/*
+ * 
+ */
+object CS5TestFunction {
+  def main(args: Array[String]): Unit = {
+    
+    
+    val sc = new SparkContext("local", "testing spark ", new SparkConf());
+
+   println(
+       CS5Select.getDedicatedAccountValuesRowPostpaid("1~5581.32\6\360~0.0\6\360~5581.32\6\360~~~~~~~~~~~1~~~~^20204010~1670111232.00\6\360~1664120832.00\6\360~5990400.00\6\360~~~20160927~~~~~~~~1~~~~")
+       )
+        
+        
+    sc.stop();
+  }
+
+ 
+}
