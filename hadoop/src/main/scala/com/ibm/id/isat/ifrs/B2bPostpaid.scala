@@ -959,7 +959,7 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START)
               else 0
             end,0) QUANTITY,
-            cast(CHARGE_IDR as int) UNIT_SELLING_PRICE,
+            nvl(cast(CHARGE_IDR as int),0) UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
@@ -1265,7 +1265,7 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Modification' or EVENT_TYPE = 'Termination' then 'Immaterial' 
               else nvl(null, '')
             end, '') IMMATERIAL_CHANGE_CODE, -- "immaterial"
-            nvl(START_PRICE, 0) UNIT_SSP
+             case when START_PRICE = null or '' then 0 else START_PRICE end UNIT_SSP
         from b2b_transform_pd
           left join (
             select 
