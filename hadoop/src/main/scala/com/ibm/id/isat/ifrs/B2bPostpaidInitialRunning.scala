@@ -243,8 +243,10 @@ object B2bPostpaidInitialRunning {
         daily_cstacc.CA_NM CA_NM,
 
         --agreement
-        case when parent_asset.AGRMT_NUM = '' then bill_charge.AGRMT_NUM else parent_asset.AGRMT_NUM end AGREEMENT_NUM,
-        substr(daily_agreement.AGRMT_NM, 1, 50) AGREEMENT_NAME,
+        --case when parent_asset.AGRMT_NUM = '' then bill_charge.AGRMT_NUM else parent_asset.AGRMT_NUM end AGREEMENT_NUM,
+        --substr(daily_agreement.AGRMT_NM, 1, 50) AGREEMENT_NAME,
+        parent_asset.AGRMT_NUM AGREEMENT_NUM,
+        case when daily_agreement.AGRMT_NM = '' then bill_charge.AGRMT_NUM else daily_agreement.AGRMT_NM end AGREEMENT_NAME,
         nvl(daily_agreement.CONTRACT_PERIOD, '0') CONTRACT_PERIOD,
         cast(daily_agreement.CONTRACT_INITIAL_AMT as int) CONTRACT_INITIAL_AMT,
         date_format(from_unixtime(unix_timestamp(daily_agreement.AGRMT_START, 'mm/dd/yyyy')), 'yyyy-mm-dd') AGREEMENT_START, -- v1 'yyyy-MM-dd'

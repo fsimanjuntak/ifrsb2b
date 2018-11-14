@@ -247,8 +247,10 @@ object B2bPostpaid {
         daily_cstacc.CA_NM CA_NM,
 
         --agreement
-        case when parent_asset.AGRMT_NUM = '' then bill_charge.AGRMT_NUM else parent_asset.AGRMT_NUM end AGREEMENT_NUM,
-        substr(daily_agreement.AGRMT_NM, 1, 50) AGREEMENT_NAME,
+        --case when parent_asset.AGRMT_NUM = '' then bill_charge.AGRMT_NUM else parent_asset.AGRMT_NUM end AGREEMENT_NUM,
+        --substr(daily_agreement.AGRMT_NM, 1, 50) AGREEMENT_NAME,
+        parent_asset.AGRMT_NUM AGREEMENT_NUM,
+        case when daily_agreement.AGRMT_NM = '' then bill_charge.AGRMT_NUM else daily_agreement.AGRMT_NM end AGREEMENT_NAME,
         nvl(daily_agreement.CONTRACT_PERIOD, '0') CONTRACT_PERIOD,
         cast(daily_agreement.CONTRACT_INITIAL_AMT as int) CONTRACT_INITIAL_AMT,
         date_format(from_unixtime(unix_timestamp(daily_agreement.AGRMT_START, 'mm/dd/yyyy')), 'yyyy-mm-dd') AGREEMENT_START, -- v1 'yyyy-MM-dd'
@@ -457,28 +459,36 @@ object B2bPostpaid {
         select
         bt.*,
         case
-          when bt.CHARGE_TYPE not in ('ONE TIME CHARGE','INSTALLATION') then
-            case 
-              when (daily_order.ORDER_TYPE = 'New Registration' 
-                   or daily_order.ORDER_TYPE = 'Migrate Post Ind to Post Corp'
-                   or daily_order.ORDER_TYPE = 'Migrate Prepaid to Post Corp'
-                   or (daily_order.ORDER_TYPE = 'Change Package' and daily_order.ACTION = 'Add')
-                   or (daily_order.ORDER_TYPE = 'Change Ownership' and daily_order.ACTION = 'Add')
-                   or (daily_order.ORDER_TYPE = 'Modify' and daily_order.ACTION = 'Add')
-                   or (daily_order.ORDER_TYPE = 'Relocation' and daily_order.ACTION = 'Add') 
-                   or (daily_order.ORDER_TYPE = 'Reconfiguration' and daily_order.ACTION = 'Add'))
-                   and ((date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') >= bt.CHARGE_START_DT)
-                       and (date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') <= bt.CHARGE_END_DT))
-                   and daily_order.ORDER_STATUS = 'Complete' then case when dense_rank() over(partition by bt.SUBSCRIPTION_REF order by date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') asc ) > 1 then 'Modification' else 'Creation' end
-              when (daily_order.ORDER_TYPE = 'Migrate Post Corp to Post Ind'
+          when (daily_order.ORDER_TYPE = 'New Registration' 
+               or daily_order.ORDER_TYPE = 'Migrate Post Ind to Post Corp'
+               or daily_order.ORDER_TYPE = 'Migrate Prepaid to Post Corp'
+               or (daily_order.ORDER_TYPE = 'Change Package' and daily_order.ACTION = 'Add')
+               or (daily_order.ORDER_TYPE = 'Change Ownership' and daily_order.ACTION = 'Add')
+               or (daily_order.ORDER_TYPE = 'Modify' and daily_order.ACTION = 'Add')
+               or (daily_order.ORDER_TYPE = 'Relocation' and daily_order.ACTION = 'Add') 
+               or (daily_order.ORDER_TYPE = 'Reconfiguration' and daily_order.ACTION = 'Add'))
+               and daily_order.ORDER_STATUS = 'Complete' then 
+               case 
+                    when bt.CHARGE_TYPE not in ('ONE TIME CHARGE','INSTALLATION') then
+                      case
+                        when ((date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') >= bt.CHARGE_START_DT)
+                           and (date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') <= bt.CHARGE_END_DT)) then
+                            case when dense_rank() over(partition by bt.SUBSCRIPTION_REF order by date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') asc ) > 1 then 'Modification' else 'Creation' end                     
+                        else null
+                      end
+                    else 
+                    case when dense_rank() over(partition by bt.SUBSCRIPTION_REF order by date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') asc ) > 1 then 'Modification' else 'Creation' end                     
+                end
+
+            when (daily_order.ORDER_TYPE = 'Migrate Post Corp to Post Ind'
                    or daily_order.ORDER_TYPE = 'Terminate'
                    or (daily_order.ORDER_TYPE = 'Change Package' and daily_order.ACTION = 'Delete')
                    or (daily_order.ORDER_TYPE = 'Change Ownership' and daily_order.ACTION = 'Delete')
                    or (daily_order.ORDER_TYPE = 'Modify' and daily_order.ACTION = 'Delete'))
                    and ((date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') >= bt.CHARGE_START_DT)
                         and (date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') <= bt.CHARGE_END_DT)) 
-                   and daily_order.ORDER_STATUS = 'Complete' then 'Termination' else null 
-              end 
+                   and daily_order.ORDER_STATUS = 'Complete' then 'Termination'
+            else null 
         end EVENT_TYPE,        
         daily_order.ORDER_TYPE,
         daily_order.ORDER_NUM,
@@ -576,31 +586,8 @@ object B2bPostpaid {
         b2b_transform_daily_order.PROFIT_CENTER,
         b2b_transform_daily_order.CUSTOMER_GROUP,
         b2b_transform_daily_order.MIDI_ATTRIBUTE,
-        case 
-            when b2b_transform_daily_order.CHARGE_TYPE in ('ONE TIME CHARGE','INSTALLATION') then
-                case 
-                    when ((b2b_transform_daily_order.ORDER_TYPE = 'Change Package' and b2b_transform_daily_order.ORDER_ACTION = 'Add') 
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Change Ownership' and b2b_transform_daily_order.ORDER_ACTION = 'Add')
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'New Registration') 
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Migrate Post Ind to Post Corp') 
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Migrate Prepaid to Post Corp') 
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Modify' and b2b_transform_daily_order.ORDER_ACTION = 'Add')
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Relocation' and b2b_transform_daily_order.ORDER_ACTION = 'Add')
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Reconfiguration' and b2b_transform_daily_order.ORDER_ACTION = 'Add'))
-                                 and b2b_transform_daily_order.ORDER_STATUS = 'Complete' then
-                                   case when b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM then 'Modification' else 'Creation' end
-                      else null                                 
-               end                              
-           else 
-               case
-                  when b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM and b2b_transform_daily_order.ORDER_NUM <> null then
-                       case when (b2b_transform_daily_order.ORDER_COMPLETION_DATE >= b2b_transform_daily_order.CHARGE_START_DT
-                            or b2b_transform_daily_order.ORDER_COMPLETION_DATE <= b2b_transform_daily_order.CHARGE_END_DT)
-                            then case when b2b_transform_daily_order.EVENT_TYPE = 'Creation' then 'Modification'
-                                      else b2b_transform_daily_order.EVENT_TYPE end
-                            else null end    
-               end
-        end EVENT_TYPE,        
+        case when b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM and b2b_transform_daily_order.EVENT_TYPE= 'Creation'
+             then 'Modification' else b2b_transform_daily_order.EVENT_TYPE end EVENT_TYPE,        
         b2b_transform_daily_order.ORDER_TYPE,
         b2b_transform_daily_order.ORDER_NUM,
         b2b_transform_daily_order.ORDER_COMPLETION_DATE,
@@ -959,7 +946,7 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START)
               else 0
             end,0) QUANTITY,
-            nvl(cast(CHARGE_IDR as int),0) UNIT_SELLING_PRICE,
+            cast(CHARGE_IDR as int) UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
@@ -1265,7 +1252,7 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Modification' or EVENT_TYPE = 'Termination' then 'Immaterial' 
               else nvl(null, '')
             end, '') IMMATERIAL_CHANGE_CODE, -- "immaterial"
-             case when START_PRICE = null or '' then 0 else START_PRICE end UNIT_SSP
+            nvl(START_PRICE, 0) UNIT_SSP
         from b2b_transform_pd
           left join (
             select 
