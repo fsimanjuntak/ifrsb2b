@@ -465,8 +465,8 @@ object B2bPostpaid {
                    or (daily_order.ORDER_TYPE = 'Change Package' and daily_order.ACTION = 'Add')
                    or (daily_order.ORDER_TYPE = 'Change Ownership' and daily_order.ACTION = 'Add')
                    or (daily_order.ORDER_TYPE = 'Modify' and daily_order.ACTION = 'Add')
-                   or daily_order.ORDER_TYPE = 'Relocation' 
-                   or daily_order.ORDER_TYPE = 'Reconfiguration')
+                   or (daily_order.ORDER_TYPE = 'Relocation' and daily_order.ACTION = 'Add') 
+                   or (daily_order.ORDER_TYPE = 'Reconfiguration' and daily_order.ACTION = 'Add'))
                    and ((date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') >= bt.CHARGE_START_DT)
                        and (date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') <= bt.CHARGE_END_DT))
                    and daily_order.ORDER_STATUS = 'Complete' then case when dense_rank() over(partition by bt.SUBSCRIPTION_REF order by date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') asc ) > 1 then 'Modification' else 'Creation' end
@@ -584,9 +584,12 @@ object B2bPostpaid {
                                  or (b2b_transform_daily_order.ORDER_TYPE = 'New Registration') 
                                  or (b2b_transform_daily_order.ORDER_TYPE = 'Migrate Post Ind to Post Corp') 
                                  or (b2b_transform_daily_order.ORDER_TYPE = 'Migrate Prepaid to Post Corp') 
-                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Modify' AND b2b_transform_daily_order.ORDER_ACTION = 'Add'))
-                                 and b2b_transform_daily_order.ORDER_STATUS = 'Complete'
-                                 and b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM then 'Modification' else 'Creation'
+                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Modify' and b2b_transform_daily_order.ORDER_ACTION = 'Add')
+                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Relocation' and b2b_transform_daily_order.ORDER_ACTION = 'Add')
+                                 or (b2b_transform_daily_order.ORDER_TYPE = 'Reconfiguration' and b2b_transform_daily_order.ORDER_ACTION = 'Add'))
+                                 and b2b_transform_daily_order.ORDER_STATUS = 'Complete' then
+                                   case when b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM then 'Modification' else 'Creation' end
+                      else null                                 
                end                              
            else 
                case
@@ -956,10 +959,7 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START)
               else 0
             end,0) QUANTITY,
-            case
-              when CHARGE_TYPE = 'MRC' or CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR * contract_period as int)
-              else 0
-            end UNIT_SELLING_PRICE,
+            cast(CHARGE_IDR as int) UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
@@ -968,7 +968,7 @@ object B2bPostpaid {
             nvl(case
               when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int)
               when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) 
-              else 0
+              else 0S
             end, 0) LINE_AMOUNT,
             nvl(null, '') BILL_TO_CUSTOMER_ID,
             nvl(null, '') SHIP_TO_CUSTOMER_ID,
@@ -1630,7 +1630,7 @@ object B2bPostpaid {
     StructField("PRODUCT_LINE", StringType, true),
     StructField("FAB_SIGNED_DATE", StringType, true),
     StructField("FAB_EARLIER_FLAG", StringType, true),
-    StructField("CONTRACT_TYPE", StringType, true),
+    StructField("EVE", StringType, true),
     StructField("QUOTE_CREATED_DATE", StringType, true),
     StructField("QUOTE_SUBMISSION_DATE", StringType, true),
     StructField("QUOTE_COMPLETION_DATE", StringType, true),

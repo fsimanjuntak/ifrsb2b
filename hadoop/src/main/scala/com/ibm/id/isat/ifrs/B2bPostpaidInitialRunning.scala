@@ -798,10 +798,7 @@ object B2bPostpaidInitialRunning {
               when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START)
               else 0 
             end,0) QUANTITY,
-            nvl(case
-              when CHARGE_TYPE = 'MRC' or CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR * contract_period as int)
-              else 0
-            end, 0) UNIT_SELLING_PRICE,
+            cast(CHARGE_IDR as int) UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
