@@ -940,23 +940,29 @@ object B2bPostpaid {
             nvl(null, '') ITEM_DESCRIPTION,
             nvl(null, '') MEMO_LINE_ID,
             'zzy' UOM_CODE,
-            nvl(case
-              when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then 1
-              when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then contract_period
-              when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START)
-              else 0
-            end,0) QUANTITY,
-            cast(CHARGE_IDR as int) UNIT_SELLING_PRICE,
+            nvl(
+              case
+                when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then 1
+                when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(contract_period as int)
+                when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as int)
+                else 0
+              end,0) QUANTITY,
+            case when CHARGE_IDR = '' then 0 else cast(nvl(CHARGE_IDR,0) as int) end UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
             nvl(null, '') UNIT_LIST_PCT_BASE_PRICE,
             nvl(null, '') BASE_PRICE,
-            nvl(case
-              when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int)
-              when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) 
-              else 0S
-            end, 0) LINE_AMOUNT,
+            nvl(
+            case
+              --when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int)
+              --when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) 
+
+              when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then cast(CHARGE_IDR as int)
+              when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(CHARGE_IDR * contract_period as int)
+              when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as int)*cast(CHARGE_IDR as int)
+            else 0 end 
+            ,0) LINE_AMOUNT,
             nvl(null, '') BILL_TO_CUSTOMER_ID,
             nvl(null, '') SHIP_TO_CUSTOMER_ID,
             nvl(null, '') BILL_TO_CUSTOMER_PARTY_ID,
@@ -1252,7 +1258,9 @@ object B2bPostpaid {
               when EVENT_TYPE = 'Modification' or EVENT_TYPE = 'Termination' then 'Immaterial' 
               else nvl(null, '')
             end, '') IMMATERIAL_CHANGE_CODE, -- "immaterial"
-            nvl(START_PRICE, 0) UNIT_SSP
+            case 
+              when START_PRICE <> '' then START_PRICE else 0 
+        end UNIT_SSP
         from b2b_transform_pd
           left join (
             select 
