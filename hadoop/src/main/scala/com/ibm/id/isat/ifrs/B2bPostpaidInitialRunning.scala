@@ -52,7 +52,8 @@ object B2bPostpaidInitialRunning {
     val pathCweoDailyOrder = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.INPUT.CATALIST_DAILY_ORDER")
     val pathIfrsBillCharge = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.INPUT.RBM_IFRS_BILL_CHARGE")
     
-    val pathB2bIfrsTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_SOR")
+    val pathB2bIfrsBillingTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_BILLING_SOR")
+    val pathB2bIfrsRevenueTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_REVENUE_SOR")
     val pathB2bIfrsRevenueCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_REVENUE_CSV")
     val pathB2bIfrsBilingCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_BILING_CSV")
     
@@ -451,8 +452,21 @@ object B2bPostpaidInitialRunning {
     b2bIfrsTransform.registerTempTable("b2b_transform")
     b2bIfrsTransform.show()
     sqlContext.sql("select count(*),'b2b_transform' from b2b_transform").show(false)
-   
-   
+    
+   // Save b2bTransform to CSV file as billing datamart
+    val billingDataMart = sqlContext.sql("""
+        select * from b2b_transform
+    """);
+    
+    billingDataMart.repartition(1).write.format("com.databricks.spark.csv")
+    .mode("overwrite").option("header", "true").option("delimiter", "|")
+    .save(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId)
+    val data_mart_billing_file = fs.globStatus(
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+    fs.rename(
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_billing_file),
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_billing_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
+
       
     sqlContext.sql("select count(*),'event_type_temp_before_running' from event_type_temp").show(false)
     //dailyRunning running
@@ -539,12 +553,12 @@ object B2bPostpaidInitialRunning {
     
     b2bIfrsTransformPd.repartition(1).write.format("com.databricks.spark.csv")
     .mode("overwrite").option("header", "true").option("delimiter", "|")
-    .save(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId)
-    val data_mart_file = fs.globStatus(
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+    .save(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId)
+    val data_mart_revenue_file = fs.globStatus(
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_file),
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_revenue_file),
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart_revenue"+prcDt+"_"+hh+mm+ss+".dat"))
     
      
     //TODO
@@ -1111,18 +1125,7 @@ object B2bPostpaidInitialRunning {
               when EVENT_TYPE = 'Modification' or EVENT_TYPE = 'Termination' then 'Immaterial' 
               else nvl(null, '')
             end,'') IMMATERIAL_CHANGE_CODE, -- "immaterial"
-            case
-              when case
-                      when case when CHARGE_TYPE = 'MRC' then CONTRACT_INITIAL_AMT else nvl(CHARGE_IDR, '') end = 0 then 0
-                      when case when CHARGE_TYPE = 'MRC' then CONTRACT_INITIAL_AMT else nvl(CHARGE_IDR, '') end != 0 then cast(case when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int) when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) else 0 end / case when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then 1 when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then contract_period when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START) else 0 end as decimal(18,9)) 
-                      else 0
-                    end = '0E-9' then '0.000000000'
-              else case
-                      when case when CHARGE_TYPE = 'MRC' then CONTRACT_INITIAL_AMT else nvl(CHARGE_IDR, '') end = 0 then 0
-                      when case when CHARGE_TYPE = 'MRC' then CONTRACT_INITIAL_AMT else nvl(CHARGE_IDR, '') end != 0 then cast(case when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int) when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) else 0 end / case when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then 1 when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then contract_period when EVENT_TYPE = 'Termination' then months_between(date_add(PRODUCT_END,1),PRODUCT_START) else 0 end as decimal(18,9)) 
-                      else 0
-                    end
-            end UNIT_SSP --v1 nvl('', '') UNIT_SSP -- not used in intial running
+        case when CHARGE_IDR = '' then 0 else cast(nvl(CHARGE_IDR,0) as int) end UNIT_SSP
         from b2b_transform_pd
           left join (
             select 

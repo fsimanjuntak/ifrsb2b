@@ -58,7 +58,8 @@ object B2bPostpaid {
     val pathCweoDailyOrder = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.INPUT.CATALIST_DAILY_ORDER")
     val pathIfrsBillCharge = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.INPUT.RBM_IFRS_BILL_CHARGE")
     
-    val pathB2bIfrsTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_SOR")
+    val pathB2bIfrsBillingTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_BILLING_SOR")
+    val pathB2bIfrsRevenueTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_REVENUE_SOR")
     val pathB2bIfrsRevenueCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_REVENUE_CSV")
     val pathB2bIfrsBilingCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_BILING_CSV")
     
@@ -452,7 +453,21 @@ object B2bPostpaid {
     b2bIfrsTransform.registerTempTable("b2b_transform")
     b2bIfrsTransform.show()
     //sqlContext.sql("select count(*),'b2b_transform' from b2b_transform").show(false)
-    sqlContext.sql("select CHARGE_START_DT,CHARGE_END_DT from b2b_transform").show(false)
+//    sqlContext.sql("select CHARGE_START_DT,CHARGE_END_DT from b2b_transform").show(false)
+    
+    // Save b2bTransform to CSV file as billing datamart
+    val billingDataMart = sqlContext.sql("""
+        select * from b2b_transform
+    """);
+    
+    billingDataMart.repartition(1).write.format("com.databricks.spark.csv")
+    .mode("overwrite").option("header", "true").option("delimiter", "|")
+    .save(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId)
+    val data_mart_billing_file = fs.globStatus(
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+    fs.rename(
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_billing_file),
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_billing_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
 
    
     val b2b_transform_daily_order = sqlContext.sql("""
@@ -495,15 +510,29 @@ object B2bPostpaid {
         daily_order.ORDER_STATUS,
         daily_order.ACTION as ORDER_ACTION,
         date_format(from_unixtime(unix_timestamp(daily_order.ORDER_COMPLETION_DATE, 'dd-MM-yyyy')), 'yyyy-MM-dd') ORDER_COMPLETION_DATE,
-        daily_order.START_PRICE
+        --daily_order.START_PRICE
+        case when bt.charge_type='ONE TIME CHARGE' then daily_order.START_PRICE else daily_order_parent.START_PRICE END START_PRICE
 
         from b2b_transform bt
+        
         left join daily_order
         on case 
           when bt.PRODUCT_ID = '1' and bt.SUBSCRIPTION_TYPE = 'MOBILE' then (bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
           when bt.CHARGE_TYPE = 'ONE TIME CHARGE' then (bt.OTC_ID = daily_order.BILLING_PRODUCT_ID and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF) or (bt.PRODUCT_ID = daily_order.BILLING_PRODUCT_ID and bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
           else (bt.PRODUCT_ID = daily_order.BILLING_PRODUCT_ID and bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
         end 
+
+        left join 
+        (select SUBSCRIPTION_REF, order_line_item_id, parent_order_id, start_price, product_type,
+          case when product_type='One Time Charge' then 'ONE TIME CHARGE'
+             when product_type='Installation Charges' then 'INSTALLATION'
+             else 'MRC' END  charge_type
+         FROM daily_order) daily_order_parent
+        on daily_order.SUBSCRIPTION_REF=daily_order_parent.SUBSCRIPTION_REF
+		    and daily_order.ORDER_LINE_ITEM_ID = 
+          (case when daily_order_parent.charge_type='ONE TIME CHARGE' then daily_order_parent.order_line_item_id  else daily_order_parent.PARENT_ORDER_ID end)
+		    and bt.charge_type = daily_order_parent.charge_type
+        
       """)
       b2b_transform_daily_order.registerTempTable("b2b_transform_daily_order")
       sqlContext.sql("select * from b2b_transform_daily_order").show(false)
@@ -686,12 +715,12 @@ object B2bPostpaid {
     
     b2bIfrsTransformPd.repartition(1).write.format("com.databricks.spark.csv")
     .mode("overwrite").option("header", "true").option("delimiter", "|")
-    .save(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId)
-    val data_mart_file = fs.globStatus(
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+    .save(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId)
+    val data_mart_revenue_file = fs.globStatus(
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_file),
-    new Path(pathB2bIfrsTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_revenue_file),
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart_revenue"+prcDt+"_"+hh+mm+ss+".dat"))
     
      
     //TODO
