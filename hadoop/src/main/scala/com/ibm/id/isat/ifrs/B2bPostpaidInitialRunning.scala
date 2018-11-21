@@ -56,6 +56,7 @@ object B2bPostpaidInitialRunning {
     val pathB2bIfrsRevenueTransform = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_TRANSFORM_REVENUE_SOR")
     val pathB2bIfrsRevenueCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_REVENUE_CSV")
     val pathB2bIfrsBilingCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_BILING_CSV")
+    val pathB2bIfrsReconcilliationCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_RECONCILLIATION_CSV")
     
     val pathB2bIfrsTransformEventTypeTempCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.TEMP.B2B_IFRS_EVENT_TYPE")
     
@@ -229,8 +230,6 @@ object B2bPostpaidInitialRunning {
     // - PRODUCT_END
     // - PROFIT_CENTER
     val b2bIfrsTransform = sqlContext.sql("""
-
-        
         select
         '"""+prcDt+"""' PRC_DT,
         '"""+jobId+"""' JOB_ID,
@@ -465,7 +464,7 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
     new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_billing_file),
-    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_billing_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/initial_ifrs_billing_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
 
       
     sqlContext.sql("select count(*),'event_type_temp_before_running' from event_type_temp").show(false)
@@ -558,7 +557,7 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
     new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_revenue_file),
-    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart_revenue"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/initial_ifrs_data_mart_revenue"+prcDt+"_"+hh+mm+ss+".dat"))
     
      
     //TODO
@@ -971,11 +970,11 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') PAYMENT_TERM_ID,
             nvl(null, '') ACCOUNTING_RULE_ID,
             nvl(case
-              when EVENT_TYPE = 'Modification' then nvl(upper(date_format(date_add(PRODUCT_START,1), 'dd-MMM-yy')), '') --different logic with daily running
-              when CHARGE_TYPE = 'ONE TIME CHARGE' then nvl(upper(date_format(CHARGE_START_DT, 'dd-MMM-yy')), '') 
-              else nvl(upper(date_format(PRODUCT_START, 'dd-MMM-yy')), '') 
+              when EVENT_TYPE = 'Modification' then nvl(date_format(date_add(PRODUCT_START,1), 'dd-MMM-yy'), '') --different logic with daily running
+              when CHARGE_TYPE = 'ONE TIME CHARGE' then nvl(date_format(CHARGE_START_DT, 'dd-MMM-yy'), '') 
+              else nvl(date_format(PRODUCT_START, 'dd-MMM-yy'), '') 
             end,'') RULE_START_DATE,
-            nvl(upper(date_format(PRODUCT_END, 'dd-MMM-yy')), '') RULE_END_DATE,
+            nvl(date_format(PRODUCT_END, 'dd-MMM-yy'), '') RULE_END_DATE,
             nvl(null, '') ACTUAL_SHIPMENT_DATE,
             nvl(null, '') ACTUAL_ARRIVAL_DATE,
             nvl(null, '') FOB_POINT_CODE,
@@ -1065,8 +1064,8 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') CONTRACT_UPDATE_TEMPLATE_NAME,
             nvl(null, '') CONTRACT_UPDATE_TEMPLATE_ID,
             nvl(case
-              when EVENT_TYPE = 'Modification' then nvl(upper(date_format(PRODUCT_START, 'dd-MMM-yy')), '') 
-              when EVENT_TYPE = 'Termination' then nvl(upper(date_format(date_add(PRODUCT_END,1), 'dd-MMM-yy')), '') 
+              when EVENT_TYPE = 'Modification' then nvl(date_format(PRODUCT_START, 'dd-MMM-yy'), '') 
+              when EVENT_TYPE = 'Termination' then nvl(date_format(date_add(PRODUCT_END,1), 'dd-MMM-yy'), '') 
               else nvl(null,'')
             end,'') CONTRACT_MODIFICATION_DATE, --SAME AS PRODUCT_START
             nvl(null, '') INITIAL_DOC_LINE_ID_INT_1, 
@@ -1118,7 +1117,7 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') RECURRING_PATERN_CODE,
             nvl(null, '') RECURRING_AMOUNT,
             nvl(case
-              when EVENT_TYPE = 'Termination' then nvl(upper(date_format(PRODUCT_END, 'dd-MMM-yy')), '')
+              when EVENT_TYPE = 'Termination' then nvl(date_format(PRODUCT_END, 'dd-MMM-yy'), '')
               else ''
             end,'') TERMINATION_DATE,
             nvl(case
@@ -1217,11 +1216,52 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId +"/"+ billing_file),
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/billingdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
    
+    // Reconcilliation file
+    val reconcilliationDf = sqlContext.sql("""
+        select t.* 
+        	from
+        		(
+        		select b2b_transform.PRC_DT,
+              b2b_transform.ACTUAL_BILL_DTM,
+              b2b_transform.CUSTOMER_NAME,       			 
+        			b2b_transform.AGREEMENT_NUM,
+        			b2b_transform.AGREEMENT_NAME,
+              b2b_transform.SUBSCRIPTION_TYPE,
+              b2b_transform.ACCOUNT_NUM,
+              b2b_transform.SERVICE_ID,
+        			b2b_transform.CHARGE_ORIGINAL,
+        			b2b_transform.CHARGE_IDR,
+        			'BILLING' RECON_TYPE 
+        			from b2b_transform
+        		union all
+        		select b2b_transform_pd.PRC_DT,
+              b2b_transform_pd.ACTUAL_BILL_DTM,
+              b2b_transform_pd.CUSTOMER_NAME,       			 
+        			b2b_transform_pd.AGREEMENT_NUM,
+        			b2b_transform_pd.AGREEMENT_NAME,
+              b2b_transform_pd.SUBSCRIPTION_TYPE,
+              b2b_transform_pd.ACCOUNT_NUM,
+              b2b_transform_pd.SERVICE_ID,
+        			b2b_transform_pd.CHARGE_ORIGINAL,
+        			b2b_transform_pd.CHARGE_IDR,
+        			'DATAMART' RECON_TYPE
+        			from b2b_transform_pd
+        		) t
+        order by t.RECON_TYPE asc
+      """)
+ 
+    reconcilliationDf.repartition(1).write.format("com.databricks.spark.csv")
+    .mode("overwrite").option("header", "true").option("delimiter", "|")
+    .save(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId)
+    val reconcilliation_file = fs.globStatus(
+    new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+    fs.rename(
+    new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ reconcilliation_file),
+    new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/reconcilliationdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
+
     //fs.delete(new Path("mydata.csv-temp"), true)
     
-    
     println("[INFO] Process done.")
-    
   }
   
   val ifrsBillChargeSchema = new StructType(Array(
