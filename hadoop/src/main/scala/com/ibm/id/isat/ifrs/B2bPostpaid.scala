@@ -254,7 +254,7 @@ object B2bPostpaid {
         parent_asset.AGRMT_NUM AGREEMENT_NUM,
         case when daily_agreement.AGRMT_NM = '' then bill_charge.AGRMT_NUM else daily_agreement.AGRMT_NM end AGREEMENT_NAME,
         nvl(daily_agreement.CONTRACT_PERIOD, '0') CONTRACT_PERIOD,
-        cast(daily_agreement.CONTRACT_INITIAL_AMT as int) CONTRACT_INITIAL_AMT,
+        cast(daily_agreement.CONTRACT_INITIAL_AMT as DOUBLE) CONTRACT_INITIAL_AMT,
         date_format(from_unixtime(unix_timestamp(daily_agreement.AGRMT_START, 'mm/dd/yyyy')), 'yyyy-mm-dd') AGREEMENT_START, -- v1 'yyyy-MM-dd'
         date_format(from_unixtime(unix_timestamp(daily_agreement.AGRMT_END, 'mm/dd/yyyy')), 'yyyy-mm-dd') AGREEMENT_END, --v1 'yyyy-MM-dd'
 
@@ -289,8 +289,8 @@ object B2bPostpaid {
         bill_charge.CURRENCY_CODE CURRENCY_CODE,
         bill_charge.CHRG_TP CHARGE_TYPE,
 
-        cast(bill_charge.CHARGE_ORI as int) CHARGE_ORIGINAL,
-        cast(bill_charge.CHARGE_IDR as int) CHARGE_IDR,
+        cast(bill_charge.CHARGE_ORI as DOUBLE) CHARGE_ORIGINAL,
+        cast(bill_charge.CHARGE_IDR as DOUBLE) CHARGE_IDR,
         date_format(substr(bill_charge.CHRG_START,0,10),'yyyy-MM-dd') CHARGE_START_DT,
         date_format(substr(
           case 
@@ -412,8 +412,8 @@ object B2bPostpaid {
           ------------------------------------------------GET AGREEMENT---------------------------------------------------------------
           left join daily_agreement
             on daily_agreement.AGRMT_NUM = parent_asset.AGRMT_NUM
-          left join daily_agreement daily_agreement_backup
-            on daily_agreement_backup.AGRMT_NM = bill_charge.AGRMT_NUM --for test : input data in bill charge, when AGRMT_NUM is null
+       --   left join daily_agreement daily_agreement_backup
+       --     on daily_agreement_backup.AGRMT_NM = bill_charge.AGRMT_NUM --for test : input data in bill charge, when AGRMT_NUM is null
 
           -----------------------------------GET REFERENCE GROUP OF SERVICE---------------------------------------------------------
           left join ref_group_of_services
@@ -973,11 +973,11 @@ object B2bPostpaid {
             nvl(
               case
                 when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then 1
-                when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(contract_period as int)
-                when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as int)
+                when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(contract_period as DOUBLE)
+                when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as DOUBLE)
                 else 0
               end,0) QUANTITY,
-            case when CHARGE_IDR = '' then 0 else cast(nvl(CHARGE_IDR,0) as int) end UNIT_SELLING_PRICE,
+            case when CHARGE_IDR = '' then 0 else cast(nvl(CHARGE_IDR,0) as DOUBLE) end UNIT_SELLING_PRICE,
             nvl(null, '') UNIT_LIST_PRICE,
             nvl(null, '') DISCOUNT_PERCENTAGE,
             nvl(null, '') UNIT_SELLING_PCT_BASE_PRICE,
@@ -985,12 +985,12 @@ object B2bPostpaid {
             nvl(null, '') BASE_PRICE,
             nvl(
             case
-              --when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as int)
-              --when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as int) 
+              --when CHARGE_TYPE = 'MRC' then cast(CHARGE_IDR * contract_period as DOUBLE)
+              --when CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE='ONE TIME CHARGE' then cast(CHARGE_IDR as DOUBLE) 
 
-              when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then cast(CHARGE_IDR as int)
-              when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(CHARGE_IDR * contract_period as int)
-              when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as int)*cast(CHARGE_IDR as int)
+              when (CHARGE_TYPE = 'INSTALLATION' or CHARGE_TYPE = 'ONE TIME CHARGE') and EVENT_TYPE != 'Termination' then cast(CHARGE_IDR as DOUBLE)
+              when (CHARGE_TYPE = 'MRC' and EVENT_TYPE != 'Termination') then cast(CHARGE_IDR * contract_period as DOUBLE)
+              when EVENT_TYPE = 'Termination' then cast(months_between(date_add(PRODUCT_END,1),PRODUCT_START) as DOUBLE)*cast(CHARGE_IDR as DOUBLE)
             else 0 end 
             ,0) LINE_AMOUNT,
             nvl(null, '') BILL_TO_CUSTOMER_ID,
@@ -1381,35 +1381,33 @@ object B2bPostpaid {
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/billingdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
    
     // Reconcilliation file
-    val reconcilliationDf = sqlContext.sql("""
+     val reconcilliationDf = sqlContext.sql("""
         select t.* 
         	from
         		(
+        		select '"""+prcDt+"""' PRC_DT,
+             ACTUAL_BILL_DTM ACTUAL_BILL_DTM, 
+             CUST_REF CUSTOMER_REF, 
+             AGRMT_NUM CONTRACT_NUMBER, 
+             SUBSCRIPTION_TYPE, 
+             ACCOUNT_NUM, 
+             SVC_ID SERVICE_ID, 
+             CHARGE_ORI CHARGE_ORIGINAL, 
+             CHARGE_IDR,
+             'BILLING' RECON_TYPE 
+        			from bill_charge
+        		union all
         		select b2b_transform.PRC_DT,
               b2b_transform.ACTUAL_BILL_DTM,
-              b2b_transform.CUSTOMER_NAME,       			 
-        			b2b_transform.AGREEMENT_NUM,
+              b2b_transform.CUSTOMER_REF,       			 
         			b2b_transform.AGREEMENT_NAME,
               b2b_transform.SUBSCRIPTION_TYPE,
               b2b_transform.ACCOUNT_NUM,
               b2b_transform.SERVICE_ID,
         			b2b_transform.CHARGE_ORIGINAL,
         			b2b_transform.CHARGE_IDR,
-        			'BILLING' RECON_TYPE 
-        			from b2b_transform
-        		union all
-        		select b2b_transform_pd.PRC_DT,
-              b2b_transform_pd.ACTUAL_BILL_DTM,
-              b2b_transform_pd.CUSTOMER_NAME,       			 
-        			b2b_transform_pd.AGREEMENT_NUM,
-        			b2b_transform_pd.AGREEMENT_NAME,
-              b2b_transform_pd.SUBSCRIPTION_TYPE,
-              b2b_transform_pd.ACCOUNT_NUM,
-              b2b_transform_pd.SERVICE_ID,
-        			b2b_transform_pd.CHARGE_ORIGINAL,
-        			b2b_transform_pd.CHARGE_IDR,
         			'DATAMART' RECON_TYPE
-        			from b2b_transform_pd
+        			from b2b_transform
         		) t
         order by t.RECON_TYPE asc
       """)
