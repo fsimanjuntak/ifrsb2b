@@ -77,10 +77,11 @@ object B2bPostpaidInitialRunning {
     else
       ss = "0" + Calendar.getInstance().get(Calendar.SECOND).toString()
     
+    val inputDate = "20180804"
     
     //TODO Main Transformation
     val dailyAssetDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyAsset + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyAsset + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -98,7 +99,7 @@ object B2bPostpaidInitialRunning {
     
     
     val dailyAgreementDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyAgreement + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyAgreement + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -116,7 +117,7 @@ object B2bPostpaidInitialRunning {
     
     
     val dailyCstaccDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyCstacc + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyCstacc + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -134,7 +135,7 @@ object B2bPostpaidInitialRunning {
     dailyCstaccDf.registerTempTable("daily_cstacc")
     
     val dailyOrderDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyOrder + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyOrder + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -163,7 +164,7 @@ object B2bPostpaidInitialRunning {
       
       
     val billChargeDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathIfrsBillCharge + "/file_date=*"))
+    .globStatus(new Path(pathIfrsBillCharge + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -1204,7 +1205,7 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsRevenueCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
     new Path(pathB2bIfrsRevenueCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ revenue_file),
-    new Path(pathB2bIfrsRevenueCsv + "/process_id=" + prcDt + "_" + jobId + "/revenuedataimport_"+prcDt+"_"+hh+mm+ss+".dat"))//v1 ".csv"))
+    new Path(pathB2bIfrsRevenueCsv + "/process_id=" + prcDt + "_" + jobId + "/initial_revenuedataimport_"+prcDt+"_"+hh+mm+ss+".dat"))//v1 ".csv"))
     
     
     billingDf.repartition(1).write.format("com.databricks.spark.csv")
@@ -1214,7 +1215,7 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId +"/"+ billing_file),
-    new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/billingdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/initial_billingdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
    
     // Reconcilliation file
     val reconcilliationDf = sqlContext.sql("""
@@ -1254,7 +1255,7 @@ object B2bPostpaidInitialRunning {
     new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
     fs.rename(
     new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ reconcilliation_file),
-    new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/reconcilliationdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
+    new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/initial_reconcilliationdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
 
     //fs.delete(new Path("mydata.csv-temp"), true)
     

@@ -83,10 +83,11 @@ object B2bPostpaid {
     else
       ss = "0" + Calendar.getInstance().get(Calendar.SECOND).toString()
     
+    val inputDate = "20180804"      
       
     //TODO Main Transformation
     val dailyAssetDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyAsset + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyAsset + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -104,7 +105,7 @@ object B2bPostpaid {
     
     
     val dailyAgreementDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyAgreement + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyAgreement + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -121,7 +122,7 @@ object B2bPostpaid {
     dailyAgreementDf.registerTempTable("daily_agreement")
        
     val dailyCstaccDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyCstacc + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyCstacc + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -139,7 +140,7 @@ object B2bPostpaid {
     dailyCstaccDf.registerTempTable("daily_cstacc")
     
     val dailyOrderDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyOrder + "/file_date=*"))
+    .globStatus(new Path(pathCweoDailyOrder + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r

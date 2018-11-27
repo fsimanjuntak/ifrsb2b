@@ -49,9 +49,10 @@ object B2bPostpaidTestSatu {
     
     val pathsource1 = path+"source/identity"    
     val pathsource2 = path+"source/detail"
+    val inputDate = "20180804"
     
     val identityDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(path + "source/identity/file_date=*"))
+    .globStatus(new Path(path + "source/identity/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -68,7 +69,7 @@ object B2bPostpaidTestSatu {
     identityDf.registerTempTable("identity")
     
     val detailDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(path + "source/identity/file_date=*"))
+    .globStatus(new Path(path + "source/identity/file_date="+inputDate))
     .map(f => f.getPath.toString)
     .map(p => {
       val pattern = ".*file_date=(.*)".r
@@ -98,6 +99,11 @@ object B2bPostpaidTestSatu {
 //      .load(path+"source2.txt")
 //      .registerTempTable("source_2")
 //    
+    
+    sqlContext.sql("""select A.USERNAME,A.NAME,B.ADDRESS from identity A inner join 
+       detail B on A.USERNAME = B.USERNAME
+       """).show()
+    
     val resultDF = sqlContext.sql("""select A.USERNAME,A.NAME,B.ADDRESS from identity A inner join 
        detail B on A.USERNAME = B.USERNAME
        """)
