@@ -77,7 +77,8 @@ object B2bPostpaidInitialRunning {
     else
       ss = "0" + Calendar.getInstance().get(Calendar.SECOND).toString()
     
-    val inputDate = "20180804"
+//    val inputDate = "20180804"
+      val inputDate = prcDt
     
     //TODO Main Transformation
     val dailyAssetDf = FileSystem.get(sc.hadoopConfiguration)
@@ -185,7 +186,8 @@ object B2bPostpaidInitialRunning {
     
     //TODO
     // References
-    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/*.csv")
+    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/REF_GROUP_OF_SERVICES.csv")
+//    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/REF_GROUP_OF_SERVICES_20180810.csv")
     refGroupOfServicesDf.registerTempTable("ref_group_of_services_logic")
     sqlContext.sql("""
     select 
@@ -203,7 +205,7 @@ object B2bPostpaidInitialRunning {
         .format("com.databricks.spark.csv")
         .option("delimiter", "|")
         .option("header", "true")
-        .load(pathRefB2mBranchRegion)
+        .load(pathRefB2mBranchRegion+"/ref_b2m_branch_region.txt")
         .cache())
     refB2mBranchRegion.registerTempTable("ref_b2m_branch_region")
     
@@ -212,7 +214,8 @@ object B2bPostpaidInitialRunning {
         .option("header", "true")
         .option("delimiter", "|")
         .schema(SummaryPostpaid.profitCenterSchema)
-        .load(pathRefProfitCenter)
+        .load(pathRefProfitCenter+"/REF_PROFIT_CENTER_20180814.csv")
+//        .load(pathRefProfitCenter+"/ref_profit_center.csv") 	
         .cache())
     refProfitCenterDf.registerTempTable("ref_profit_center")
     
@@ -223,7 +226,7 @@ object B2bPostpaidInitialRunning {
     """).cache())
     refCityToProfitCenterDf.registerTempTable("ref_city_to_profit_center")
     
-    val refCustomerGroupDf = ReferenceDF.getCustomerGroupDF(sqlContext, pathRefCustomerGroup + "/*.csv")
+    val refCustomerGroupDf = ReferenceDF.getCustomerGroupDF(sqlContext, pathRefCustomerGroup + "/REF_CUSTOMER_GROUP.csv")
     refCustomerGroupDf.registerTempTable("ref_customer_group")
     
     
@@ -579,7 +582,7 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') DOC_ID_CHAR_4,
             nvl(null, '') DOC_ID_CHAR_5,
             nvl(date_format(from_unixtime(unix_timestamp('"""+prcDt+"""', 'yyyyMMdd')), 'dd-MMM-yyyy'), '') DOCUMENT_DATE,
-            nvl(substr(AGREEMENT_NAME,1,30), '') DOCUMENT_NUMBER,--v1 nvl(substr(concat(AGREEMENT_NAME, '_', '"""+prcDt+"""'),1,30), '') DOCUMENT_NUMBER,
+            nvl(substr(AGREEMENT_NAME,1,30), '') DOCUMENT_NUMBER,--v1 nvl(substr(concat(nvl(AGREEMENT_NAME,''), '_', '"""+prcDt+"""'),1,30), '') DOCUMENT_NUMBER,
             nvl(null, '') DOCUMENT_TYPE,
             nvl(null, '') DOCUMENT_CREATION_DATE,
             nvl(null, '') DOCUMENT_UPDATE_DATE,
@@ -788,7 +791,7 @@ object B2bPostpaidInitialRunning {
             nvl(substr(AGREEMENT_NAME,31,60), '') DOC_LINE_ID_CHAR_2, --done
             nvl(substr(SERVICE_ID,1,30), '') DOC_LINE_ID_CHAR_3,
             nvl(substr(SERVICE_ID,31,60), '') DOC_LINE_ID_CHAR_4,
-            nvl(concat(PRODUCT_SEQ, '_', SUBSCRIPTION_REF, '_', CHARGE_TYPE), '') DOC_LINE_ID_CHAR_5,
+            nvl(concat(nvl(PRODUCT_SEQ,''), '_', nvl(SUBSCRIPTION_REF,''), '_', nvl(CHARGE_TYPE,'')), '') DOC_LINE_ID_CHAR_5,
             nvl(null, '') DOC_ID_INT_1,
             nvl(null, '') DOC_ID_INT_2,
             nvl(null, '') DOC_ID_INT_3,
@@ -862,23 +865,23 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') COMMENTS,
             'Y' SRC_ATTRIBUTE_CHAR_1,--v1 case when b.cnt <= 1 then 'N' else 'Y' end SRC_ATTRIBUTE_CHAR_1,
             nvl(substr(PRODUCT_DESCRIPTION,0,150), '') SRC_ATTRIBUTE_CHAR_2,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP), '') SRC_ATTRIBUTE_CHAR_3,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_4,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,'')), '') SRC_ATTRIBUTE_CHAR_3,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_4,
             nvl(PROFIT_CENTER, '') SRC_ATTRIBUTE_CHAR_5,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_6,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_7,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_8,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_9,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_10,
-            nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_11,--nvl(concat(AGREEMENT_NAME, '_', '"""+prcDt+"""'), '') SRC_ATTRIBUTE_CHAR_11,
+            nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_11,--nvl(concat(nvl(AGREEMENT_NAME,''), '_', '"""+prcDt+"""'), '') SRC_ATTRIBUTE_CHAR_11,
             nvl(SERVICE_ID, '') SRC_ATTRIBUTE_CHAR_12,
-            nvl(concat(PRODUCT_SEQ, '_', SUBSCRIPTION_REF, '_', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_13,
+            nvl(concat(nvl(PRODUCT_SEQ,''), '_', nvl(SUBSCRIPTION_REF,''), '_', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_13,
             nvl(BUSINESS_AREA_NAME, '') SRC_ATTRIBUTE_CHAR_14,
             nvl(SERVICE_GROUP, '') SRC_ATTRIBUTE_CHAR_15,
             nvl(CUSTOMER_GROUP, '') SRC_ATTRIBUTE_CHAR_16,
             nvl(CHARGE_TYPE, '') SRC_ATTRIBUTE_CHAR_17,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_18,
-            nvl(concat(PRODUCT_NAME, '-', SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_19,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_18,
+            nvl(concat(nvl(PRODUCT_NAME,''), '-', nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_19,
             nvl(concat(date_format(AGREEMENT_START, 'dd-MMM-yy'), '-', date_format(AGREEMENT_END, 'dd-MMM-yy')), '') SRC_ATTRIBUTE_CHAR_20,
             nvl(CONTRACT_INITIAL_AMT, 0) SRC_ATTRIBUTE_CHAR_21,
             nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_22,
@@ -1039,7 +1042,7 @@ object B2bPostpaidInitialRunning {
             nvl(null, '') ORIG_SYS_SHIP_TO_CUST_REF,
             nvl(null, '') SOURCE_INVENTORY_ORG_CODE,
             nvl(null, '') SOURCE_MEMO_LINE_NAME,
-            nvl(concat(BUSINESS_AREA_NAME, '-', SERVICE_GROUP,'-',CUSTOMER_GROUP,'-',CHARGE_TYPE), '') SOURCE_ITEM_NUMBER,
+            nvl(concat(nvl(BUSINESS_AREA_NAME,''), '-', nvl(SERVICE_GROUP,''),'-',nvl(CUSTOMER_GROUP,''),'-',nvl(CHARGE_TYPE,'')), '') SOURCE_ITEM_NUMBER,
             nvl(null, '') SOURCE_UOM_CODE,
             nvl(null, '') SOURCE_SALESREP_NAME,
             nvl(null, '') SOURCE_PAYMENT_TERM_NAME,

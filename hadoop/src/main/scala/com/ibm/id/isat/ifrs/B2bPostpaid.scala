@@ -15,6 +15,7 @@ import org.apache.spark.storage.StorageLevel
 import com.ibm.id.isat.utils.ReferenceDF
 import java.text.SimpleDateFormat
 import java.util.Calendar
+import scala.collection.mutable.ListBuffer
 
 object B2bPostpaid {
   def main(args: Array[String]): Unit = {
@@ -39,6 +40,8 @@ object B2bPostpaid {
     
     // Initialize SQL Context
     val sqlContext = new HiveContext(sc)
+    sqlContext.setConf("hive.exec.dynamic.partition","true") 
+    sqlContext.setConf("hive.exec.dynamic.partition.mode", "nonstrict")
     
     // Initialize File System (for renameFile) 
     val fs = FileSystem.get(sc.hadoopConfiguration);
@@ -83,9 +86,124 @@ object B2bPostpaid {
     else
       ss = "0" + Calendar.getInstance().get(Calendar.SECOND).toString()
     
-    val inputDate = "20180804"      
-      
+//    val inputDate = "20180804"
+    val inputDate = prcDt
+          
     //TODO Main Transformation
+    
+  val numberofbackwardorders= -60
+  val format="yyyyMMdd"
+  val backwardsOrderDate = Calendar.getInstance()
+  backwardsOrderDate.setTime(new SimpleDateFormat(format).parse(inputDate))
+  backwardsOrderDate.add(Calendar.DATE, numberofbackwardorders)
+  val theOldestOrder= new SimpleDateFormat(format).format(backwardsOrderDate.getTime()).toString();
+  
+  println("Inserting daily order to table sor.b2bpostpaid_dailyorder")
+  val dailyOrderDf = FileSystem.get(sc.hadoopConfiguration)
+    .globStatus(new Path(pathCweoDailyOrder + "/file_date="+inputDate))
+    .map(f => f.getPath.toString)
+    .map(p => {
+      val pattern = ".*file_date=(.*)".r
+      val pattern(fileDate) = p
+      sqlContext.read.format("com.databricks.spark.csv")
+      .option("basePath", pathCweoDailyOrder)
+      .option("header", "true")
+      .option("delimiter", "|")
+      .schema(cweoDailyOrderSchema)
+      .load(p + "/*.txt")
+      .withColumn("file_date", lit(fileDate))
+    })
+    .reduce((a, b) => a.unionAll(b))
+    .filter("ORDER_STATUS = 'Complete'")
+  
+   println("Drop partition "+inputDate)
+   sqlContext.sql("alter table sor.b2bpostpaid_dailyorder drop partition (file_date='"+inputDate+"')")
+   println("Drop partition "+theOldestOrder)
+   sqlContext.sql("alter table sor.b2bpostpaid_dailyorder drop partition (file_date='"+theOldestOrder+"')")
+   dailyOrderDf.withColumn("file_date",lit(inputDate))
+   dailyOrderDf.write.mode("append").partitionBy("file_date").insertInto("sor.b2bpostpaid_dailyorder")
+//        dailyOrderDf.registerTempTable("daily_order");
+//        dailyOrderDf.withColumn("file_date",lit(inputDate))
+//        sqlContext.sql("drop table if exists sor.b2bpostpaid_dailyorder");
+//        sqlContext.sql("create table sor.b2bpostpaid_dailyorder as select * from daily_order");
+        
+     
+    
+    
+    // Get daily order 60 days backwards
+//    var lstBackwardsDailyOrder = new ListBuffer[String]()
+//    val totalorders= -60
+//    val format="yyyyMMdd"
+//    val backwardsOrderDate = Calendar.getInstance()
+//    backwardsOrderDate.setTime(new SimpleDateFormat(format).parse(inputDate))
+//    backwardsOrderDate.add(Calendar.DATE, totalorders)
+//    lstBackwardsDailyOrder += new SimpleDateFormat(format).format(backwardsOrderDate.getTime()).toString();
+//
+//    for(orderDate <- 1 to 59 ){
+//      backwardsOrderDate.add(Calendar.DATE, 1)
+//      val dt_order = new SimpleDateFormat(format).format(backwardsOrderDate.getTime()).toString()
+//      lstBackwardsDailyOrder += dt_order;   
+//   }
+//    
+//   for (tr_date <- lstBackwardsDailyOrder){
+//     println(pathCweoDailyOrder+"/file_date="+tr_date + "/*.txt")
+//     try {
+//           val backwardsOrderDF =  sqlContext.read.format("com.databricks.spark.csv")
+//            .option("basePath", pathCweoDailyOrder)
+//            .option("header", "true")
+//            .option("delimiter", "|")
+//            .schema(cweoDailyOrderSchema)
+//            .load(pathCweoDailyOrder +"/file_date="+tr_date+"/*.txt")
+//            .withColumn("file_date", lit(tr_date))
+//            .filter("ORDER_STATUS = 'Complete'")
+//            
+//          if (!backwardsOrderDF.rdd.isEmpty){
+////             dailyOrderDf = dailyOrderDf.unionAll(backwardsOrderDF);
+//               backwardsOrderDF.withColumn("file_date",lit(tr_date))
+//               backwardsOrderDF.write.mode("append").partitionBy("file_date").insertInto("sor.b2bpostpaid_dailyorder")
+//          }
+//          else{
+//            println("Dataframe is Empty")
+//          }
+//     }catch 
+//     {
+//       case e: Exception => println("Exception: "+e.getMessage)
+//     }
+//    }
+   
+//    dailyOrderDf.registerTempTable("daily_order")
+//    val resultDF = sqlContext.sql("""select count(*) from sor.b2bpostpaid_dailyorder """).show()
+    
+    
+   println("Getting billcharge from hdfs and inserting into temp table")
+   
+   try
+   {
+     val billChargeDf = FileSystem.get(sc.hadoopConfiguration)
+      .globStatus(new Path(pathIfrsBillCharge + "/file_date="+inputDate))
+      .map(f => f.getPath.toString)
+      .map(p => {
+        val pattern = ".*file_date=(.*)".r
+        val pattern(fileDate) = p
+        sqlContext.read.format("com.databricks.spark.csv")
+        .option("basePath", pathIfrsBillCharge)
+        .option("header", "true")
+        .option("delimiter", "|")
+        .schema(ifrsBillChargeSchema)
+        .load(p + "/*.dat")
+        .withColumn("file_date", lit(fileDate))
+      })
+      .reduce((a, b) => a.unionAll(b))
+      //.withColumn("PRODUCT_END", when(col("CHRG_TP") === "INSTALLATION", col("PRODUCT_START")).otherwise(col("PRODUCT_END")))
+      .filter("SUBSCRIPTION_TYPE not in ('MOBILE','IPHONE','BULK','STARONE')") //filter data, update from 5530 to 5319
+      billChargeDf.registerTempTable("bill_charge")
+   }catch {
+       case e: Exception => println("Exception: "+e.getMessage)
+       // if bill_charge does not exist, then terminate the execution
+       return;
+    }
+
+    println("Getting daily asset from hdfs and inserting into temp table")
     val dailyAssetDf = FileSystem.get(sc.hadoopConfiguration)
     .globStatus(new Path(pathCweoDailyAsset + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
@@ -104,6 +222,7 @@ object B2bPostpaid {
     dailyAssetDf.registerTempTable("daily_asset")
     
     
+    println("Getting agreement from hdfs and inserting into temp table")
     val dailyAgreementDf = FileSystem.get(sc.hadoopConfiguration)
     .globStatus(new Path(pathCweoDailyAgreement + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
@@ -121,6 +240,7 @@ object B2bPostpaid {
     .reduce((a, b) => a.unionAll(b))
     dailyAgreementDf.registerTempTable("daily_agreement")
        
+    println("Getting daily customer account from hdfs and inserting into temp table")
     val dailyCstaccDf = FileSystem.get(sc.hadoopConfiguration)
     .globStatus(new Path(pathCweoDailyCstacc + "/file_date="+inputDate))
     .map(f => f.getPath.toString)
@@ -139,25 +259,12 @@ object B2bPostpaid {
     .distinct()
     dailyCstaccDf.registerTempTable("daily_cstacc")
     
-    val dailyOrderDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathCweoDailyOrder + "/file_date="+inputDate))
-    .map(f => f.getPath.toString)
-    .map(p => {
-      val pattern = ".*file_date=(.*)".r
-      val pattern(fileDate) = p
-      sqlContext.read.format("com.databricks.spark.csv")
-      .option("basePath", pathCweoDailyOrder)
-      .option("header", "true")
-      .option("delimiter", "|")
-      .schema(cweoDailyOrderSchema)
-      .load(p + "/*.txt")
-      .withColumn("file_date", lit(fileDate))
-    })
-    .reduce((a, b) => a.unionAll(b))
-    dailyOrderDf.registerTempTable("daily_order")
+    
+    
     /*
     val evenTypeTempFile = fs.globStatus(
     new Path(pathB2bIfrsTransformEventTypeTempCsv + "/ifrs*"))(0).getPath().getName()*/
+    println("Broadcasting eventtype")
     val eventTypeTempDf = broadcast(
        sqlContext.read.format("com.databricks.spark.csv")
       .option("header", "true")
@@ -166,30 +273,12 @@ object B2bPostpaid {
       .cache())
       .distinct()
       eventTypeTempDf.registerTempTable("event_type_temp")
-      
-      
-    val billChargeDf = FileSystem.get(sc.hadoopConfiguration)
-    .globStatus(new Path(pathIfrsBillCharge + "/file_date=*"))
-    .map(f => f.getPath.toString)
-    .map(p => {
-      val pattern = ".*file_date=(.*)".r
-      val pattern(fileDate) = p
-      sqlContext.read.format("com.databricks.spark.csv")
-      .option("basePath", pathIfrsBillCharge)
-      .option("header", "true")
-      .option("delimiter", "|")
-      .schema(ifrsBillChargeSchema)
-      .load(p + "/*.dat")
-      .withColumn("file_date", lit(fileDate))
-    })
-    .reduce((a, b) => a.unionAll(b))
-    //.withColumn("PRODUCT_END", when(col("CHRG_TP") === "INSTALLATION", col("PRODUCT_START")).otherwise(col("PRODUCT_END")))
-    .filter("SUBSCRIPTION_TYPE not in ('MOBILE','IPHONE','BULK','STARONE')") //filter data, update from 5530 to 5319
-    billChargeDf.registerTempTable("bill_charge")
     
     //TODO
     // References
-    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/*.csv")
+    println("Getting refGroupOfServicesDf")
+    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/REF_GROUP_OF_SERVICES.csv")
+//    val refGroupOfServicesDf = ReferenceDF.getGroupOfServicesDF(sqlContext, pathRefGroupOfServices + "/REF_GROUP_OF_SERVICES_20180810.csv")
     refGroupOfServicesDf.registerTempTable("ref_group_of_services_logic")
     sqlContext.sql("""
     select 
@@ -203,37 +292,43 @@ object B2bPostpaid {
     """).registerTempTable("ref_group_of_services")
     
     
+    println("Getting refB2mBranchRegion")
     val refB2mBranchRegion = broadcast(sqlContext.read
         .format("com.databricks.spark.csv")
         .option("delimiter", "|")
         .option("header", "true")
-        .load(pathRefB2mBranchRegion)
+        .load(pathRefB2mBranchRegion+"/ref_b2m_branch_region.txt")
         .cache())
     refB2mBranchRegion.registerTempTable("ref_b2m_branch_region")
     
+    println("Getting refProfitCenterDf")
     val refProfitCenterDf = broadcast(sqlContext.read
         .format("com.databricks.spark.csv")
         .option("header", "true")
         .option("delimiter", "|")
         .schema(SummaryPostpaid.profitCenterSchema)
-        .load(pathRefProfitCenter)
+        .load(pathRefProfitCenter+"/REF_PROFIT_CENTER_20180814.csv")
+//        .load(pathRefProfitCenter+"/ref_profit_center.csv") 	
         .cache())
     refProfitCenterDf.registerTempTable("ref_profit_center")
     
     
+    println("Getting refCityToProfitCenterDf")
     val refCityToProfitCenterDf = broadcast(sqlContext.sql("""
         select distinct city, pc_id
         from ref_profit_center
     """).cache())
     refCityToProfitCenterDf.registerTempTable("ref_city_to_profit_center")
     
-    val refCustomerGroupDf = ReferenceDF.getCustomerGroupDF(sqlContext, pathRefCustomerGroup + "/*.csv")
+    println("Getting refCustomerGroupDf")
+    val refCustomerGroupDf = ReferenceDF.getCustomerGroupDF(sqlContext, pathRefCustomerGroup + "/REF_CUSTOMER_GROUP.csv")
     refCustomerGroupDf.registerTempTable("ref_customer_group")
     
     
     //TODO Output
     // - PRODUCT_END
     // - PROFIT_CENTER
+    println("querying b2bIfrsTransform")
     val b2bIfrsTransform = sqlContext.sql("""
 
         
@@ -453,11 +548,12 @@ object B2bPostpaid {
       """)
     b2bIfrsTransform.persist(StorageLevel.DISK_ONLY)
     b2bIfrsTransform.registerTempTable("b2b_transform")
-    b2bIfrsTransform.show()
+//    b2bIfrsTransform.show()
     //sqlContext.sql("select count(*),'b2b_transform' from b2b_transform").show(false)
 //    sqlContext.sql("select CHARGE_START_DT,CHARGE_END_DT from b2b_transform").show(false)
     
     // Save b2bTransform to CSV file as billing datamart
+    println("querying billingDataMart")
     val billingDataMart = sqlContext.sql("""
         select * from b2b_transform
     """);
@@ -471,7 +567,7 @@ object B2bPostpaid {
     new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_billing_file),
     new Path(pathB2bIfrsBillingTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_billing_data_mart"+prcDt+"_"+hh+mm+ss+".dat"))
 
-   
+    println("querying b2b_transform_daily_order")
     val b2b_transform_daily_order = sqlContext.sql("""
         select
         bt.*,
@@ -517,7 +613,7 @@ object B2bPostpaid {
 
         from b2b_transform bt
         
-        left join daily_order
+        left join sor.b2bpostpaid_dailyorder daily_order
         on case 
           when bt.PRODUCT_ID = '1' and bt.SUBSCRIPTION_TYPE = 'MOBILE' then (bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
           when bt.CHARGE_TYPE = 'ONE TIME CHARGE' then (bt.OTC_ID = daily_order.BILLING_PRODUCT_ID and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF) or (bt.PRODUCT_ID = daily_order.BILLING_PRODUCT_ID and bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
@@ -529,7 +625,7 @@ object B2bPostpaid {
           case when product_type='One Time Charge' then 'ONE TIME CHARGE'
              when product_type='Installation Charges' then 'INSTALLATION'
              else 'MRC' END  charge_type
-         FROM daily_order) daily_order_parent
+         FROM sor.b2bpostpaid_dailyorder daily_order) daily_order_parent
         on daily_order.SUBSCRIPTION_REF=daily_order_parent.SUBSCRIPTION_REF
 		    and daily_order.ORDER_LINE_ITEM_ID = 
           (case when daily_order_parent.charge_type='ONE TIME CHARGE' then daily_order_parent.order_line_item_id  else daily_order_parent.PARENT_ORDER_ID end)
@@ -570,7 +666,7 @@ object B2bPostpaid {
     
     sqlContext.sql("select * from event_type_temp").show(false)
   
-      
+    println("querying b2bIfrsTransformEt") 
     val b2bIfrsTransformEt = sqlContext.sql("""
         select
         b2b_transform_daily_order.PRC_DT,
@@ -633,6 +729,8 @@ object B2bPostpaid {
       
       sqlContext.sql("select count(*),'event_type_temp_before_running' from event_type_temp").show(false)
     //dailyRunning running
+      
+    println("querying eventType") 
     val eventType = sqlContext.sql("""
         select 
         *
@@ -676,7 +774,7 @@ object B2bPostpaid {
     sqlContext.sql("select count(*),'event_type_temp_after_running' from event_type_temp").show(false) 
    
     
-    
+    println("querying productDescription") 
     val productDescription = sqlContext.sql("""
         select 
         AGREEMENT_NUM,
@@ -698,7 +796,7 @@ object B2bPostpaid {
       """)
     productDescription.registerTempTable("product_description")
     
-    
+    println("querying b2bIfrsTransformPd") 
     val b2bIfrsTransformPd = sqlContext.sql("""
          select
          b2bIfrsTransformEt.*,
@@ -726,6 +824,7 @@ object B2bPostpaid {
     
      
     //TODO
+    println("querying headerDf") 
     val headerDf = sqlContext.sql("""
         select 
             'H' record_type,
@@ -743,7 +842,7 @@ object B2bPostpaid {
             nvl(null, '') DOC_ID_CHAR_4,
             nvl(null, '') DOC_ID_CHAR_5,
             nvl(date_format(from_unixtime(unix_timestamp('"""+prcDt+"""', 'yyyyMMdd')), 'dd-MMM-yyyy'), '') DOCUMENT_DATE,
-            nvl(substr(AGREEMENT_NAME,1,30), '') DOCUMENT_NUMBER,  --v1 nvl(substr(concat(AGREEMENT_NAME, '_', '"""+prcDt+"""'),1,30), '') DOCUMENT_NUMBER,
+            nvl(substr(AGREEMENT_NAME,1,30), '') DOCUMENT_NUMBER,  --v1 nvl(substr(concat(nvl(AGREEMENT_NAME,''), '_', '"""+prcDt+"""'),1,30), '') DOCUMENT_NUMBER,
             nvl(null, '') DOCUMENT_TYPE,
             nvl(null, '') DOCUMENT_CREATION_DATE,
             nvl(null, '') DOCUMENT_UPDATE_DATE,
@@ -935,6 +1034,7 @@ object B2bPostpaid {
     .save("/user/hdp-rev_dev/ifrs_b2b/output/testrevenue/H")
     
     //TODO
+    println("querying lineDf") 
     val lineDf = sqlContext.sql("""
         select
             'L' RECORD_TYPE,
@@ -951,7 +1051,7 @@ object B2bPostpaid {
             nvl(substr(AGREEMENT_NAME,31,60), '') DOC_LINE_ID_CHAR_2, --done
             nvl(substr(SERVICE_ID,1,30), '') DOC_LINE_ID_CHAR_3,
             nvl(substr(SERVICE_ID,31,60), '') DOC_LINE_ID_CHAR_4,
-            nvl(concat(PRODUCT_SEQ, '_', SUBSCRIPTION_REF, '_', CHARGE_TYPE), '') DOC_LINE_ID_CHAR_5,
+            nvl(concat(nvl(PRODUCT_SEQ,''), '_', nvl(SUBSCRIPTION_REF,''), '_', nvl(CHARGE_TYPE,'')), '') DOC_LINE_ID_CHAR_5,
             nvl(null, '') DOC_ID_INT_1,
             nvl(null, '') DOC_ID_INT_2,
             nvl(null, '') DOC_ID_INT_3,
@@ -1026,23 +1126,23 @@ object B2bPostpaid {
             nvl(null, '') COMMENTS,
             'Y' SRC_ATTRIBUTE_CHAR_1,--v1 case when b.cnt <= 1 then 'N' else 'Y' end SRC_ATTRIBUTE_CHAR_1,
             nvl(substr(PRODUCT_DESCRIPTION,0,150), '') SRC_ATTRIBUTE_CHAR_2,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP), '') SRC_ATTRIBUTE_CHAR_3,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_4,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,'')), '') SRC_ATTRIBUTE_CHAR_3,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_4,
             nvl(PROFIT_CENTER, '')  SRC_ATTRIBUTE_CHAR_5,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_6,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_7,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_8,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_9,
             nvl(null, '') SRC_ATTRIBUTE_CHAR_10,
-            nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_11,--v1 nvl(concat(AGREEMENT_NAME, '_', '"""+prcDt+"""'), '') SRC_ATTRIBUTE_CHAR_11,
+            nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_11,--v1 nvl(concat(ncl(AGREEMENT_NAME,''), '_', '"""+prcDt+"""'), '') SRC_ATTRIBUTE_CHAR_11,
             nvl(SERVICE_ID, '') SRC_ATTRIBUTE_CHAR_12,
-            nvl(concat(PRODUCT_SEQ, '_', SUBSCRIPTION_REF, '_', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_13,
+            nvl(concat(nvl(PRODUCT_SEQ,''), '_', nvl(SUBSCRIPTION_REF,''), '_', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_13,
             nvl(BUSINESS_AREA_NAME, '') SRC_ATTRIBUTE_CHAR_14,
             nvl(SERVICE_GROUP, '') SRC_ATTRIBUTE_CHAR_15,
             nvl(CUSTOMER_GROUP, '') SRC_ATTRIBUTE_CHAR_16,
             nvl(CHARGE_TYPE, '') SRC_ATTRIBUTE_CHAR_17,
-            nvl(concat(SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_18,
-            nvl(concat(PRODUCT_NAME, '-', SERVICE_GROUP, '-', CUSTOMER_GROUP, '-', CHARGE_TYPE), '') SRC_ATTRIBUTE_CHAR_19,
+            nvl(concat(nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_18,
+            nvl(concat(nvl(PRODUCT_NAME,''), '-', nvl(SERVICE_GROUP,''), '-', nvl(CUSTOMER_GROUP,''), '-', nvl(CHARGE_TYPE,'')), '') SRC_ATTRIBUTE_CHAR_19,
             nvl(concat(date_format(AGREEMENT_START, 'dd-MMM-yy'), '-', date_format(AGREEMENT_END, 'dd-MMM-yy')), '') SRC_ATTRIBUTE_CHAR_20,
             nvl(CONTRACT_INITIAL_AMT, 0) SRC_ATTRIBUTE_CHAR_21,
             nvl(AGREEMENT_NAME, '') SRC_ATTRIBUTE_CHAR_22,
@@ -1203,7 +1303,7 @@ object B2bPostpaid {
             nvl(null, '') ORIG_SYS_SHIP_TO_CUST_REF,
             nvl(null, '') SOURCE_INVENTORY_ORG_CODE,
             nvl(null, '') SOURCE_MEMO_LINE_NAME,
-            nvl(concat(BUSINESS_AREA_NAME, '-', SERVICE_GROUP,'-',CUSTOMER_GROUP,'-',CHARGE_TYPE), '') SOURCE_ITEM_NUMBER,
+            nvl(concat(nvl(BUSINESS_AREA_NAME,''), '-', nvl(SERVICE_GROUP,''),'-',nvl(CUSTOMER_GROUP,''),'-',nvl(CHARGE_TYPE,'')), '') SOURCE_ITEM_NUMBER,
             nvl(null, '') SOURCE_UOM_CODE,
             nvl(null, '') SOURCE_SALESREP_NAME,
             nvl(null, '') SOURCE_PAYMENT_TERM_NAME,
@@ -1321,7 +1421,7 @@ object B2bPostpaid {
     .option("delimiter", "|")
     .save("/user/hdp-rev_dev/ifrs_b2b/output/testrevenue/L")
     
-    
+    println("querying billingDf") 
     val billingDf = sqlContext.sql("""
       select
         date_format(ACTUAL_BILL_DTM,'dd-MMM-yy') BILL_DATE,     
@@ -1352,7 +1452,8 @@ object B2bPostpaid {
       billingDf.registerTempTable("b2b_biling")
       sqlContext.sql("select count(*),'b2b_biling' from b2b_biling").show(false)
       
-    val revenueDf = sqlContext.sql("""
+     println("querying revenueDf") 
+     val revenueDf = sqlContext.sql("""
       select value, ord
       from (
         select concat_ws('|', *) value, concat(LPAD(concat(DOC_ID_CHAR_1, ORIG_SYS_BILL_TO_CUST_SITE_REF), 100, '0'), RECORD_TYPE) ord from header
@@ -1382,6 +1483,7 @@ object B2bPostpaid {
     new Path(pathB2bIfrsBilingCsv + "/process_id=" + prcDt + "_" + jobId + "/billingdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
    
     // Reconcilliation file
+     println("querying reconcilliationDf") 
      val reconcilliationDf = sqlContext.sql("""
         select t.* 
         	from
