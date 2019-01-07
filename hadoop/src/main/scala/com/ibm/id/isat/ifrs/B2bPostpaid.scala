@@ -122,13 +122,20 @@ object B2bPostpaid {
    sqlContext.sql("alter table sor.b2bpostpaid_dailyorder drop partition (file_date='"+theOldestOrder+"')")
    dailyOrderDf.withColumn("file_date",lit(inputDate))
    dailyOrderDf.write.mode("append").partitionBy("file_date").insertInto("sor.b2bpostpaid_dailyorder")
+   
+  var sql_daily_order= "select * from sor.b2bpostpaid_dailyorder where TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  <= TO_DATE(from_unixtime(unix_timestamp('"+inputDate+"','yyyyMMdd'),'yyyy-MM-dd')) and TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  >= TO_DATE(from_unixtime(unix_timestamp('"+theOldestOrder+"','yyyyMMdd'),'yyyy-MM-dd'))";
+  println(sql_daily_order) 
+  val daily_order = sqlContext.sql(sql_daily_order);
+  daily_order.registerTempTable("daily_order");
+   
+//   val daily_ordercount = sqlContext.sql("select count(*) from sor.b2bpostpaid_dailyorder where TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  <= TO_DATE(from_unixtime(unix_timestamp('"+inputDate+"','dd-MM-yyyy'),'yyyy-MM-dd')) and TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  >= TO_DATE(from_unixtime(unix_timestamp('"+theOldestOrder+"','dd-MM-yyyy'),'yyyy-MM-dd'))").show();
 //        dailyOrderDf.registerTempTable("daily_order");
 //        dailyOrderDf.withColumn("file_date",lit(inputDate))
 //        sqlContext.sql("drop table if exists sor.b2bpostpaid_dailyorder");
 //        sqlContext.sql("create table sor.b2bpostpaid_dailyorder as select * from daily_order");
         
      
-    
+//     where file_date not in ('20181105')
     
     // Get daily order 60 days backwards
 //    var lstBackwardsDailyOrder = new ListBuffer[String]()
@@ -214,6 +221,7 @@ object B2bPostpaid {
       .option("basePath", pathCweoDailyAsset)
       .option("header", "true")
       .option("delimiter", "|")
+      .option("escape","\"")
       .schema(cweoDailyAssetSchema)
       .load(p + "/*.txt")
       .withColumn("file_date", lit(fileDate))
@@ -221,6 +229,10 @@ object B2bPostpaid {
     .reduce((a, b) => a.unionAll(b))
     dailyAssetDf.registerTempTable("daily_asset")
     
+//    println("Daily Asset")
+//    val daily_asset = sqlContext.sql("""
+//        select * from daily_asset where BA_ID='2-MOL9D7D'
+//    """).show(false);
     
     println("Getting agreement from hdfs and inserting into temp table")
     val dailyAgreementDf = FileSystem.get(sc.hadoopConfiguration)
@@ -613,7 +625,7 @@ object B2bPostpaid {
 
         from b2b_transform bt
         
-        left join sor.b2bpostpaid_dailyorder daily_order
+        left join daily_order
         on case 
           when bt.PRODUCT_ID = '1' and bt.SUBSCRIPTION_TYPE = 'MOBILE' then (bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
           when bt.CHARGE_TYPE = 'ONE TIME CHARGE' then (bt.OTC_ID = daily_order.BILLING_PRODUCT_ID and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF) or (bt.PRODUCT_ID = daily_order.BILLING_PRODUCT_ID and bt.PRODUCT_SEQ = daily_order.PRODUCT_SEQ and bt.SUBSCRIPTION_REF = daily_order.SUBSCRIPTION_REF)
@@ -625,7 +637,7 @@ object B2bPostpaid {
           case when product_type='One Time Charge' then 'ONE TIME CHARGE'
              when product_type='Installation Charges' then 'INSTALLATION'
              else 'MRC' END  charge_type
-         FROM sor.b2bpostpaid_dailyorder daily_order) daily_order_parent
+         FROM daily_order) daily_order_parent
         on daily_order.SUBSCRIPTION_REF=daily_order_parent.SUBSCRIPTION_REF
 		    and daily_order.ORDER_LINE_ITEM_ID = 
           (case when daily_order_parent.charge_type='ONE TIME CHARGE' then daily_order_parent.order_line_item_id  else daily_order_parent.PARENT_ORDER_ID end)
@@ -634,6 +646,9 @@ object B2bPostpaid {
       """)
       b2b_transform_daily_order.registerTempTable("b2b_transform_daily_order")
       sqlContext.sql("select * from b2b_transform_daily_order").show(false)
+      
+      
+      //sor.b2bpostpaid_dailyorder
      // sqlContext.sql("select count(*),'b2b_transform_daily_order' from b2b_transform_daily_order").show(false)
       
       /*val filterDuplicateDailyOrder = sqlContext.sql("""
