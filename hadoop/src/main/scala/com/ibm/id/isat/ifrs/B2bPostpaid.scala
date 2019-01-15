@@ -16,6 +16,7 @@ import com.ibm.id.isat.utils.ReferenceDF
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import scala.collection.mutable.ListBuffer
+import org.apache.spark.sql.functions.unix_timestamp
 
 object B2bPostpaid {
   def main(args: Array[String]): Unit = {
@@ -66,6 +67,9 @@ object B2bPostpaid {
     val pathB2bIfrsRevenueCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_REVENUE_CSV")
     val pathB2bIfrsBilingCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_BILING_CSV")
     val pathB2bIfrsReconcilliationCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_RECONCILLIATION_CSV")
+    val pathB2bIfrsCustomerAccountValidationCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_CUSTOMERGROUPVALIDATION_CSV")
+    val pathB2bIfrsGroupOfServiceValidationCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_GROUPOFSERVICESVALIDATION_CSV")    
+    val pathB2bIfrsSummaryReconcilliationCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.OUTPUT.B2B_IFRS_SUMMARYRECONCILLIATION_CSV")
 
     val pathB2bIfrsTransformEventTypeTempCsv = Common.getConfigDirectory(sc, configDir, "IFRS_B2B.TEMP.B2B_IFRS_EVENT_TYPE")
     
@@ -85,18 +89,24 @@ object B2bPostpaid {
       ss = Calendar.getInstance().get(Calendar.SECOND).toString()
     else
       ss = "0" + Calendar.getInstance().get(Calendar.SECOND).toString()
+
     
 //    val inputDate = "20180804"
     val inputDate = prcDt
           
+    current_timestamp()
     //TODO Main Transformation
     
   val numberofbackwardorders= -60
-  val format="yyyyMMdd"
+  val format= "yyyyMMdd"
   val backwardsOrderDate = Calendar.getInstance()
   backwardsOrderDate.setTime(new SimpleDateFormat(format).parse(inputDate))
   backwardsOrderDate.add(Calendar.DATE, numberofbackwardorders)
-  val theOldestOrder= new SimpleDateFormat(format).format(backwardsOrderDate.getTime()).toString();
+  val theOldestBackwardOrder= new SimpleDateFormat(format).format(backwardsOrderDate.getTime()).toString()
+    
+  val orderPartitionDateToDelete = backwardsOrderDate
+  orderPartitionDateToDelete.add(Calendar.DATE, -30)
+  val orderPartitionDateToDeleteStr = new SimpleDateFormat(format).format(orderPartitionDateToDelete.getTime()).toString()
   
   println("Inserting daily order to table sor.b2bpostpaid_dailyorder")
   val dailyOrderDf = FileSystem.get(sc.hadoopConfiguration)
@@ -117,13 +127,13 @@ object B2bPostpaid {
     .filter("ORDER_STATUS = 'Complete'")
   
    println("Drop partition "+inputDate)
-   sqlContext.sql("alter table sor.b2bpostpaid_dailyorder drop partition (file_date='"+inputDate+"')")
-   println("Drop partition "+theOldestOrder)
-   sqlContext.sql("alter table sor.b2bpostpaid_dailyorder drop partition (file_date='"+theOldestOrder+"')")
+   sqlContext.sql("alter table stg.ifrsb2b_dailyorder drop partition (file_date='"+inputDate+"')")
+   println("Drop partition "+orderPartitionDateToDeleteStr)
+   sqlContext.sql("alter table stg.ifrsb2b_dailyorder drop partition (file_date='"+orderPartitionDateToDeleteStr+"')")
    dailyOrderDf.withColumn("file_date",lit(inputDate))
-   dailyOrderDf.write.mode("append").partitionBy("file_date").insertInto("sor.b2bpostpaid_dailyorder")
+   dailyOrderDf.write.mode("append").partitionBy("file_date").insertInto("stg.ifrsb2b_dailyorder")
    
-  var sql_daily_order= "select * from sor.b2bpostpaid_dailyorder where TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  <= TO_DATE(from_unixtime(unix_timestamp('"+inputDate+"','yyyyMMdd'),'yyyy-MM-dd')) and TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  >= TO_DATE(from_unixtime(unix_timestamp('"+theOldestOrder+"','yyyyMMdd'),'yyyy-MM-dd'))";
+  var sql_daily_order= "select * from stg.ifrsb2b_dailyorder where TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  <= TO_DATE(from_unixtime(unix_timestamp('"+inputDate+"','yyyyMMdd'),'yyyy-MM-dd')) and TO_DATE(from_unixtime(unix_timestamp(order_completion_date,'dd-MM-yyyy HH:mm:ss'),'yyyy-MM-dd'))  >= TO_DATE(from_unixtime(unix_timestamp('"+theOldestBackwardOrder+"','yyyyMMdd'),'yyyy-MM-dd'))";
   println(sql_daily_order) 
   val daily_order = sqlContext.sql(sql_daily_order);
   daily_order.registerTempTable("daily_order");
@@ -277,13 +287,16 @@ object B2bPostpaid {
     val evenTypeTempFile = fs.globStatus(
     new Path(pathB2bIfrsTransformEventTypeTempCsv + "/ifrs*"))(0).getPath().getName()*/
     println("Broadcasting eventtype")
-    val eventTypeTempDf = broadcast(
-       sqlContext.read.format("com.databricks.spark.csv")
-      .option("header", "true")
-      .option("delimiter","|")
-      .load(pathB2bIfrsTransformEventTypeTempCsv)//+"/"+evenTypeTempFile)
-      .cache())
-      .distinct()
+//    val eventTypeTempDf = broadcast(
+//       sqlContext.read.format("com.databricks.spark.csv")
+//      .option("header", "true")
+//      .option("delimiter","|")
+//      .load(pathB2bIfrsTransformEventTypeTempCsv)//+"/"+evenTypeTempFile)
+//      .cache())
+//      .distinct()
+    val eventTypeTempDf =sqlContext.sql("""
+          select service_id SERVICE_ID,agreement_num AGREEMENT_NUM,po_id PO_ID,agreement_name AGREEMENT_NAME,cast(row_number as int) from stg.ifrsb2b_eventtype group by service_id,agreement_num,po_id,agreement_name,cast(row_number as int)
+      """).toDF()
       eventTypeTempDf.registerTempTable("event_type_temp")
     
     //TODO
@@ -645,7 +658,7 @@ object B2bPostpaid {
         
       """)
       b2b_transform_daily_order.registerTempTable("b2b_transform_daily_order")
-      sqlContext.sql("select * from b2b_transform_daily_order").show(false)
+//      sqlContext.sql("select * from b2b_transform_daily_order").show(false)
       
       
       //sor.b2bpostpaid_dailyorder
@@ -679,7 +692,7 @@ object B2bPostpaid {
       """)
       filterDuplicateDailyOrder.filter("cnt <> 1").show(100)*/
     
-    sqlContext.sql("select * from event_type_temp").show(false)
+//    sqlContext.sql("select * from event_type_temp").show(false)
   
     println("querying b2bIfrsTransformEt") 
     val b2bIfrsTransformEt = sqlContext.sql("""
@@ -740,9 +753,9 @@ object B2bPostpaid {
           on b2b_transform_daily_order.SERVICE_ID = event_type_temp.SERVICE_ID
           and b2b_transform_daily_order.AGREEMENT_NUM = event_type_temp.AGREEMENT_NUM
       """).registerTempTable("b2bIfrsTransformEt")
-      sqlContext.sql("select count(*) from b2bIfrsTransformEt").show(false)
+//      sqlContext.sql("select count(*) from b2bIfrsTransformEt").show(false)
       
-      sqlContext.sql("select count(*),'event_type_temp_before_running' from event_type_temp").show(false)
+//      sqlContext.sql("select count(*),'event_type_temp_before_running' from event_type_temp").show(false)
     //dailyRunning running
       
     println("querying eventType") 
@@ -781,12 +794,22 @@ object B2bPostpaid {
               ) a
             ) b
           ) c where c.row_number = 1
-      """)
-    eventType.registerTempTable("event_type_after_running")
-    eventType.repartition(1).write.format("com.databricks.spark.csv")
-    .mode("overwrite").option("header", "true").option("delimiter", "|")
-    .save(pathB2bIfrsTransformEventTypeTempCsv)
-    sqlContext.sql("select count(*),'event_type_temp_after_running' from event_type_temp").show(false) 
+      """).toDF()
+      
+//      eventType.show(false)
+      eventType.registerTempTable("event_type_after_running")
+
+      //Insert event type into table 
+     println("Inserting event type into table")
+     def dfEventType = sqlContext.sql("""
+          select SERVICE_ID,AGREEMENT_NUM,PO_ID,AGREEMENT_NAME,cast(row_number as int) from event_type_after_running
+      """).toDF()      
+      dfEventType.write.mode("overwrite").partitionBy("row_number").insertInto("stg.ifrsb2b_eventtype")
+
+//    eventType.repartition(1).write.format("com.databricks.spark.csv")
+//    .mode("overwrite").option("header", "true").option("delimiter", "|")
+//    .save(pathB2bIfrsTransformEventTypeTempCsv)
+//    sqlContext.sql("select count(*),'event_type_temp_after_running' from event_type_temp").show(false) 
    
     
     println("querying productDescription") 
@@ -825,7 +848,7 @@ object B2bPostpaid {
       """)
     b2bIfrsTransformPd.registerTempTable("b2b_transform_pd")
       
-    sqlContext.sql("select count(*),'b2b_transform_pd' from b2b_transform_pd").show()
+//    sqlContext.sql("select count(*),'b2b_transform_pd' from b2b_transform_pd").show()
       
     
     b2bIfrsTransformPd.repartition(1).write.format("com.databricks.spark.csv")
@@ -836,6 +859,52 @@ object B2bPostpaid {
     fs.rename(
     new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/"+ data_mart_revenue_file),
     new Path(pathB2bIfrsRevenueTransform + "/process_id=" + prcDt + "_" + jobId + "/ifrs_data_mart_revenue"+prcDt+"_"+hh+mm+ss+".dat"))
+    
+    // Fetching customer names which have group validation null
+    println("Fecthing customer names which have group validation null")
+    val b2bIfrsTransformPdCustgroupvalidation = sqlContext.sql("select distinct(CUSTOMER_NAME), CUSTOMER_GROUP,"+jobId+" job_id,"+prcDt+" dt_id from b2b_transform_pd where CUSTOMER_GROUP is null or CUSTOMER_GROUP=''")
+    // Dropping partition
+    println("Droppring partition stg.ifrsb2b_custgroupvalidation where dt_id"+prcDt)
+    sqlContext.sql("alter table stg.ifrsb2b_custgroupvalidation drop partition (dt_id='"+prcDt+"')")
+    // Insert rows into table ifrsb2b_custgroupvalidation if data frame is not empty
+    if (!b2bIfrsTransformPdCustgroupvalidation.rdd.isEmpty){
+      println("Inserting rows into table stg.ifrsb2b_custgroupvalidation")
+      b2bIfrsTransformPdCustgroupvalidation.withColumn("ppm_dttm",lit(from_unixtime(unix_timestamp())))
+      b2bIfrsTransformPdCustgroupvalidation.write.mode("append").partitionBy("job_id","dt_id").insertInto("stg.ifrsb2b_custgroupvalidation")
+      
+      println("writing b2bIfrsTransformPdCustgroupvalidation rows into hdfs")
+      b2bIfrsTransformPdCustgroupvalidation.repartition(1).write.format("com.databricks.spark.csv")
+      .mode("overwrite").option("header", "true").option("delimiter", "|")
+      .save(pathB2bIfrsCustomerAccountValidationCsv + "/process_id=" + prcDt + "_" + jobId)
+      val custgroupvalidation_file = fs.globStatus(
+      new Path(pathB2bIfrsCustomerAccountValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+      fs.rename(
+      new Path(pathB2bIfrsCustomerAccountValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ custgroupvalidation_file),
+      new Path(pathB2bIfrsCustomerAccountValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/custgroupvalidation_"+prcDt+"_"+hh+mm+ss+".dat"))
+    }
+    
+    // Fetching customer names which have group validation null
+    println("Fetching customer names which have group validation null")
+    val b2bIfrsTransformPdGroupofservicesvalidation = sqlContext.sql("select distinct(BUSINESS_AREA_NAME), SERVICE_GROUP,"+jobId+" job_id,"+prcDt+" dt_id from b2b_transform_pd where SERVICE_GROUP is null or SERVICE_GROUP=''")
+    // Dropping partition
+    println("Dropping partition stg.ifrsb2b_groupofservicesvalidation where dt_id"+prcDt)
+    sqlContext.sql("alter table stg.ifrsb2b_groupofservicesvalidation drop partition (dt_id='"+prcDt+"')")
+    // Inserting rows into table ifrsb2b_custgroupvalidation if data frame is not empty
+    if (!b2bIfrsTransformPdGroupofservicesvalidation.rdd.isEmpty){
+      println("Inserting rows into table stg.ifrsb2b_groupofservicesvalidation")
+      b2bIfrsTransformPdGroupofservicesvalidation.withColumn("ppm_dttm",lit(from_unixtime(unix_timestamp())))
+      b2bIfrsTransformPdGroupofservicesvalidation.write.mode("append").partitionBy("job_id","dt_id").insertInto("stg.ifrsb2b_groupofservicesvalidation")
+      
+      println("writing b2bIfrsTransformPdGroupofservicesvalidation rows into hdfs")
+      b2bIfrsTransformPdGroupofservicesvalidation.repartition(1).write.format("com.databricks.spark.csv")
+      .mode("overwrite").option("header", "true").option("delimiter", "|")
+      .save(pathB2bIfrsGroupOfServiceValidationCsv + "/process_id=" + prcDt + "_" + jobId)
+      val groupofservices_file = fs.globStatus(
+      new Path(pathB2bIfrsGroupOfServiceValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+      fs.rename(
+      new Path(pathB2bIfrsGroupOfServiceValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ groupofservices_file),
+      new Path(pathB2bIfrsGroupOfServiceValidationCsv + "/process_id=" + prcDt + "_" + jobId + "/groupofservices_"+prcDt+"_"+hh+mm+ss+".dat"))
+    }
     
      
     //TODO
@@ -1465,7 +1534,7 @@ object B2bPostpaid {
       from b2b_transform --get original b2b_transform table without any duplicate data
       """)
       billingDf.registerTempTable("b2b_biling")
-      sqlContext.sql("select count(*),'b2b_biling' from b2b_biling").show(false)
+//      sqlContext.sql("select count(*),'b2b_biling' from b2b_biling").show(false)
       
      println("querying revenueDf") 
      val revenueDf = sqlContext.sql("""
@@ -1510,8 +1579,8 @@ object B2bPostpaid {
              SUBSCRIPTION_TYPE, 
              ACCOUNT_NUM, 
              SVC_ID SERVICE_ID, 
-             CHARGE_ORI CHARGE_ORIGINAL, 
-             CHARGE_IDR,
+             cast(nvl(CHARGE_ORI,0) as double) CHARGE_ORIGINAL,
+             cast(nvl(CHARGE_IDR,0) as double) CHARGE_IDR,
              'BILLING' RECON_TYPE 
         			from bill_charge
         		union all
@@ -1522,13 +1591,14 @@ object B2bPostpaid {
               b2b_transform.SUBSCRIPTION_TYPE,
               b2b_transform.ACCOUNT_NUM,
               b2b_transform.SERVICE_ID,
-        			b2b_transform.CHARGE_ORIGINAL,
-        			b2b_transform.CHARGE_IDR,
+        			cast(nvl(b2b_transform.CHARGE_ORIGINAL,0) as double) CHARGE_ORIGINAL,
+        			cast(nvl(b2b_transform.CHARGE_IDR,0) as double) CHARGE_IDR,
         			'DATAMART' RECON_TYPE
         			from b2b_transform
         		) t
         order by t.RECON_TYPE asc
       """)
+    reconcilliationDf.registerTempTable("ifrsb2b_reconcilliation")
  
     reconcilliationDf.repartition(1).write.format("com.databricks.spark.csv")
     .mode("overwrite").option("header", "true").option("delimiter", "|")
@@ -1539,9 +1609,31 @@ object B2bPostpaid {
     new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ reconcilliation_file),
     new Path(pathB2bIfrsReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/reconcilliationdataimport_"+prcDt+"_"+hh+mm+ss+".dat"))
 
-  
+    if (!reconcilliationDf.rdd.isEmpty){
+      // Fetching reconciliation of revenue
+      println("Fetching reconciliation of revenue")
+      val dfRevenueRec = sqlContext.sql("select cast(sum(CHARGE_IDR) as double) total, RECON_TYPE,"+jobId+" job_id,PRC_DT dt_id from ifrsb2b_reconcilliation group by PRC_DT,RECON_TYPE")
+      dfRevenueRec.show()
+      // Dropping partition
+      println("Dropping partition stg.ifrsb2b_recon where dt_id"+prcDt)
+      sqlContext.sql("alter table stg.ifrsb2b_recon drop partition (dt_id='"+prcDt+"')")
+      // Inserting rows into table stg.ifrsb2b_recon
+      println("Inserting rows into table stg.ifrsb2b_recon")
+      dfRevenueRec.withColumn("ppm_dttm",lit(from_utc_timestamp(current_timestamp(), "Asia/Jakarta")))
+      dfRevenueRec.write.mode("append").partitionBy("job_id","dt_id").insertInto("stg.ifrsb2b_recon")
+      
+      println("writing dfRevenueRec rows into hdfs")
+      dfRevenueRec.repartition(1).write.format("com.databricks.spark.csv")
+      .mode("overwrite").option("header", "true").option("delimiter", "|")
+      .save(pathB2bIfrsSummaryReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId)
+      val reconcilliationresume_file = fs.globStatus(
+      new Path(pathB2bIfrsSummaryReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/part*"))(0).getPath().getName()
+      fs.rename(
+      new Path(pathB2bIfrsSummaryReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/"+ reconcilliationresume_file),
+      new Path(pathB2bIfrsSummaryReconcilliationCsv + "/process_id=" + prcDt + "_" + jobId + "/reconcilliationresume_"+prcDt+"_"+hh+mm+ss+".dat"))
+    }
     
-    
+
     //fs.delete(new Path("mydata.csv-temp"), true)
     
     println("[INFO] Process done.")
